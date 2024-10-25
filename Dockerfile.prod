@@ -1,0 +1,47 @@
+# Dependencies
+FROM node:18.20-alpine3.19 as deps
+
+WORKDIR /usr/src/app
+
+COPY package*.json ./
+COPY yarn.lock ./
+
+RUN yarn install
+
+
+# Builder
+FROM node:18.20-alpine3.19 as builder
+
+ARG ORDERS_DATABASE_URL
+ENV DATABASE_URL=$ORDERS_DATABASE_URL
+
+WORKDIR /usr/src/app
+
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+
+COPY . .
+
+RUN yarn prisma migrate deploy
+RUN yarn prisma generate
+
+RUN yarn build
+
+RUN yarn install --production --frozen-lockfile && yarn cache clean --force
+
+
+# Create final docker image
+FROM node:18.20-alpine3.19 as prod
+
+WORKDIR /usr/src/app
+
+COPY --from=builder /usr/src/app/node_modules ./node_modules
+
+COPY --from=builder /usr/src/app/dist ./dist
+
+ENV NODE_ENV=production
+
+USER node
+
+EXPOSE 3000
+
+CMD [ "node", "dist/main.js" ]
